@@ -53,13 +53,9 @@ from urllib.parse import urlparse
 import click
 
 from sast_dast_validator.models import (
-    NormalizedFinding,
     SastInput,
     ValidationOutput,
     ValidationStatus,
-    VulnType,
-    VulnCategory,
-    SARIFOutput,
 )
 from sast_dast_validator.normalizer import SastNormalizer
 from sast_dast_validator.executor import DynamicValidator, ValidatorConfig
@@ -71,18 +67,6 @@ logging.basicConfig(
     stream=sys.stderr,
 )
 logger = logging.getLogger(__name__)
-
-
-# Valid vulnerability types for filtering
-VALID_VULN_TYPES = [
-    "xss", "xss_reflected", "xss_stored", "xss_dom",
-    "injection", "sqli", "cmdi", "ssti", "code_injection",
-    "ssrf", "open_redirect", "idor", "broken_access", "auth_bypass",
-    "secrets", "hardcoded_creds", "info_disclosure",
-    "crypto", "weak_crypto",
-    "missing_headers", "security_misconfig",
-    "other"
-]
 
 
 @click.command(context_settings={"help_option_names": ["-h", "--help"]})
@@ -131,37 +115,15 @@ VALID_VULN_TYPES = [
     help="Number of parallel workers (default: 1, increase if you have higher API rate limits)"
 )
 @click.option(
-    "--parallel/--sequential",
-    default=False,
-    help="Run tests in parallel (default: sequential to avoid rate limits)"
-)
-@click.option(
     "--delay",
     default=0.5,
     type=float,
     help="Delay between tests in seconds for rate limiting (default: 0.5)"
 )
 @click.option(
-    "--filter-type", "-f",
-    type=click.Choice(VALID_VULN_TYPES, case_sensitive=False),
-    multiple=True,
-    help="Filter to specific vulnerability types (can be specified multiple times)"
-)
-@click.option(
-    "--filter-category", "-c",
-    type=click.Choice(["xss", "injection", "ssrf", "redirect", "access_control", "secrets", "crypto", "headers", "other"]),
-    multiple=True,
-    help="Filter to specific vulnerability categories"
-)
-@click.option(
     "--cookies",
     type=click.Path(exists=True),
     help="Path to JSON file with cookies for authentication"
-)
-@click.option(
-    "--login-script",
-    type=click.Path(exists=True),
-    help="Path to JSON file with initial actions for login"
 )
 @click.option(
     "--screenshots/--no-screenshots",
@@ -172,35 +134,6 @@ VALID_VULN_TYPES = [
     "--evidence-dir",
     type=click.Path(),
     help="Directory to save evidence files (screenshots, etc.)"
-)
-@click.option(
-    "--record-gif",
-    is_flag=True,
-    default=False,
-    help="Generate GIF recordings of agent actions"
-)
-@click.option(
-    "--use-cloud",
-    is_flag=True,
-    default=False,
-    help="Use Browser-Use cloud browsers (better anti-detection)"
-)
-@click.option(
-    "--sarif",
-    type=click.Path(),
-    help="Output SARIF file for GitHub/GitLab security integration"
-)
-@click.option(
-    "--fail-on-high",
-    is_flag=True,
-    default=False,
-    help="Exit with code 1 if high-severity vulnerabilities are confirmed (for CI/CD)"
-)
-@click.option(
-    "--generate-queues",
-    is_flag=True,
-    default=False,
-    help="Generate exploitation queue files grouped by category"
 )
 @click.option(
     "--verbose", "-v",
@@ -221,19 +154,10 @@ def main(
     timeout: int,
     max_steps: int,
     workers: int,
-    parallel: bool,
     delay: float,
-    filter_type: tuple,
-    filter_category: tuple,
     cookies: str | None,
-    login_script: str | None,
     screenshots: bool,
     evidence_dir: str | None,
-    record_gif: bool,
-    use_cloud: bool,
-    sarif: str | None,
-    fail_on_high: bool,
-    generate_queues: bool,
     verbose: bool,
     quiet: bool,
 ):
@@ -247,15 +171,10 @@ def main(
     Examples:
     
         # Basic usage
-        python -m browser_use.security.validator.cli -i semgrep.json -t http://localhost:3000
+        sast-dast -i semgrep.json -t http://localhost:3000
         
-        # With parallel execution and authentication
-        python -m browser_use.security.validator.cli -i findings.json -t http://app.local \\
-            --workers 10 --cookies auth.json --output results.json
-        
-        # For CI/CD pipeline
-        python -m browser_use.security.validator.cli -i findings.json -t http://app.local \\
-            --sarif results.sarif --fail-on-high --headless
+        # With authentication and multiple workers
+        sast-dast -i findings.json -t http://app.local --workers 5 --cookies auth.json -o results.json
     """
     if verbose:
         logging.getLogger().setLevel(logging.DEBUG)
@@ -272,19 +191,10 @@ def main(
         timeout=timeout,
         max_steps=max_steps,
         workers=workers,
-        parallel=parallel,
         delay=delay,
-        filter_types=list(filter_type) if filter_type else None,
-        filter_categories=list(filter_category) if filter_category else None,
         cookies_file=cookies,
-        login_script_file=login_script,
         capture_screenshots=screenshots,
         evidence_dir=Path(evidence_dir) if evidence_dir else None,
-        generate_gif=record_gif,
-        use_cloud=use_cloud,
-        sarif_output=sarif,
-        fail_on_high=fail_on_high,
-        generate_queues=generate_queues,
         quiet=quiet,
     ))
     
@@ -300,19 +210,10 @@ async def _async_main(
     timeout: int,
     max_steps: int,
     workers: int,
-    parallel: bool,
     delay: float,
-    filter_types: list[str] | None,
-    filter_categories: list[str] | None,
     cookies_file: str | None,
-    login_script_file: str | None,
     capture_screenshots: bool,
     evidence_dir: Path | None,
-    generate_gif: bool,
-    use_cloud: bool,
-    sarif_output: str | None,
-    fail_on_high: bool,
-    generate_queues: bool,
     quiet: bool,
 ) -> int:
     """Async main function. Returns exit code."""
@@ -325,8 +226,8 @@ async def _async_main(
         logger.info(f"Input: {input_file}")
         logger.info(f"Target: {target}")
         logger.info(f"Model: {model}")
-        logger.info(f"Workers: {workers}, Parallel: {parallel}")
-        logger.info(f"Headless: {headless}, Cloud: {use_cloud}")
+        logger.info(f"Workers: {workers}")
+        logger.info(f"Headless: {headless}")
         logger.info("=" * 60)
     
     # Load and normalize findings
@@ -355,42 +256,6 @@ async def _async_main(
         logger.error("Example: Start your app with 'npm start' or 'python app.py'")
         return 3
     
-    # Generate exploitation queues if requested
-    if generate_queues:
-        queue_dir = evidence_dir or Path("./output/queues")
-        queues = normalizer.generate_queues(findings, queue_dir)
-        logger.info(f"Generated {len(queues)} exploitation queues in {queue_dir}")
-        
-        if not quiet:
-            for category, queue in queues.items():
-                logger.info(f"  - {category.value}: {queue.count} vulnerabilities")
-    
-    # Filter by type if specified
-    if filter_types:
-        vuln_types = []
-        for t in filter_types:
-            try:
-                vuln_types.append(VulnType(t.lower()))
-            except ValueError:
-                logger.warning(f"Unknown vulnerability type: {t}")
-        
-        if vuln_types:
-            findings = [f for f in findings if f.vuln_type in vuln_types]
-            logger.info(f"Filtered to {len(findings)} findings of types: {filter_types}")
-    
-    # Filter by category if specified
-    if filter_categories:
-        categories = []
-        for c in filter_categories:
-            try:
-                categories.append(VulnCategory(c.lower()))
-            except ValueError:
-                logger.warning(f"Unknown category: {c}")
-        
-        if categories:
-            findings = [f for f in findings if f.get_category() in categories]
-            logger.info(f"Filtered to {len(findings)} findings in categories: {filter_categories}")
-    
     if not findings:
         logger.warning("No findings to validate!")
         return 0
@@ -404,17 +269,6 @@ async def _async_main(
             logger.info(f"Loaded {len(cookies)} cookies from {cookies_file}")
         except Exception as e:
             logger.error(f"Failed to load cookies: {e}")
-            return 2
-    
-    # Load login script if provided
-    initial_actions = None
-    if login_script_file:
-        try:
-            with open(login_script_file) as f:
-                initial_actions = json.load(f)
-            logger.info(f"Loaded login script with {len(initial_actions)} actions")
-        except Exception as e:
-            logger.error(f"Failed to load login script: {e}")
             return 2
     
     # Initialize LLM
@@ -434,10 +288,7 @@ async def _async_main(
         workers=workers,
         delay=delay,
         capture_screenshots=capture_screenshots,
-        generate_gif=generate_gif,
-        use_cloud=use_cloud,
         cookies=cookies,
-        initial_actions=initial_actions,
         evidence_dir=evidence_dir,
     )
     
@@ -460,8 +311,7 @@ async def _async_main(
     # Run validation
     logger.info("Starting dynamic validation...")
     results = await validator.validate_all(
-        findings, 
-        parallel=parallel,
+        findings,
         on_progress=on_progress,
     )
     
@@ -491,20 +341,11 @@ async def _async_main(
     else:
         print(json.dumps(output_data, indent=2, default=str))
     
-    # Generate SARIF output if requested
-    if sarif_output:
-        sarif = SARIFOutput.from_validation_output(validation_output)
-        sarif_data = sarif.model_dump(mode="json", by_alias=True)
-        
-        with open(sarif_output, "w") as f:
-            json.dump(sarif_data, f, indent=2)
-        logger.info(f"SARIF output written to: {sarif_output}")
-    
     # Determine exit code
-    exit_code = validation_output.get_exit_code(fail_on_high=fail_on_high)
+    exit_code = validation_output.get_exit_code()
     
     if exit_code != 0:
-        logger.warning(f"⚠️  Exiting with code {exit_code} (high-severity vulnerabilities confirmed)")
+        logger.warning(f"⚠️  Exiting with code {exit_code} (vulnerabilities confirmed)")
     
     return exit_code
 
