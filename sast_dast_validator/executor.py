@@ -492,8 +492,12 @@ class DynamicValidator:
             
             is_vulnerable = _is_vulnerable(result_text)
             is_blocked = "BLOCKED" in result_text.upper()
+            is_error = not result_text or result_text.strip() == ""
             
-            if is_vulnerable:
+            if is_error:
+                status = ValidationStatus.ERROR
+                result_text = "ERROR: LLM agent failed - no result returned (check API key)"
+            elif is_vulnerable:
                 status = ValidationStatus.CONFIRMED
             elif is_blocked:
                 status = ValidationStatus.NEEDS_REVIEW
@@ -610,8 +614,12 @@ class DynamicValidator:
             
             is_vulnerable = _is_vulnerable(result_text)
             is_blocked = "BLOCKED" in result_text.upper()
+            is_error = not result_text or result_text.strip() == ""
             
-            if is_vulnerable:
+            if is_error:
+                status = ValidationStatus.ERROR
+                result_text = "ERROR: LLM agent failed - no result returned (check API key)"
+            elif is_vulnerable:
                 status = ValidationStatus.CONFIRMED
             elif is_blocked:
                 status = ValidationStatus.NEEDS_REVIEW
@@ -696,8 +704,12 @@ class DynamicValidator:
                 result_text = f"BLOCKED: Agent error - {str(e)[:100]}"
             
             is_vulnerable = _is_vulnerable(result_text)
+            is_error = not result_text or result_text.strip() == ""
             
-            if is_vulnerable:
+            if is_error:
+                status = ValidationStatus.ERROR
+                result_text = "ERROR: LLM agent failed - no result returned (check API key)"
+            elif is_vulnerable:
                 status = ValidationStatus.CONFIRMED
             elif "NEEDS_REVIEW" in result_text.upper():
                 status = ValidationStatus.NEEDS_REVIEW
@@ -781,10 +793,19 @@ class DynamicValidator:
                 result_text = f"BLOCKED: Agent error - {str(e)[:100]}"
             
             is_vulnerable = _is_vulnerable(result_text)
+            is_error = not result_text or result_text.strip() == ""
+            
+            if is_error:
+                status = ValidationStatus.ERROR
+                result_text = "ERROR: LLM agent failed - no result returned (check API key)"
+            elif is_vulnerable:
+                status = ValidationStatus.CONFIRMED
+            else:
+                status = ValidationStatus.FALSE_POSITIVE
             
             return ValidationResult(
                 finding_id=finding.id,
-                status=ValidationStatus.CONFIRMED if is_vulnerable else ValidationStatus.FALSE_POSITIVE,
+                status=status,
                 is_vulnerable=is_vulnerable,
                 tested_url=test_url,
                 tested_payload=payload,
@@ -854,6 +875,15 @@ class DynamicValidator:
                 result_text = f"BLOCKED: Agent error - {str(e)[:100]}"
             
             is_vulnerable = _is_vulnerable(result_text)
+            is_error = not result_text or result_text.strip() == ""
+            
+            if is_error:
+                status = ValidationStatus.ERROR
+                result_text = "ERROR: LLM agent failed - no result returned (check API key)"
+            elif is_vulnerable:
+                status = ValidationStatus.CONFIRMED
+            else:
+                status = ValidationStatus.FALSE_POSITIVE
             
             screenshot_path = None
             if is_vulnerable:
@@ -861,7 +891,7 @@ class DynamicValidator:
             
             return ValidationResult(
                 finding_id=finding.id,
-                status=ValidationStatus.CONFIRMED if is_vulnerable else ValidationStatus.FALSE_POSITIVE,
+                status=status,
                 is_vulnerable=is_vulnerable,
                 tested_url=test_url,
                 tested_payload=payload,
