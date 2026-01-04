@@ -708,16 +708,20 @@ class PayloadGenerator:
         num_payloads: int,
     ) -> list[GeneratedPayload]:
         """Generate payloads using LLM."""
+        from langchain_core.messages import HumanMessage, SystemMessage
+        
         prompt = PAYLOAD_GENERATION_PROMPT.format(
             context=context.to_prompt_context(),
             num_payloads=num_payloads
         )
         
-        # Combine system and user prompt into single string for browser-use LLM
-        full_prompt = f"{PAYLOAD_GENERATION_SYSTEM}\n\n{prompt}"
-        
         try:
-            response = await self.llm.ainvoke(full_prompt)
+            # Use proper message format for LangChain LLMs
+            messages = [
+                SystemMessage(content=PAYLOAD_GENERATION_SYSTEM),
+                HumanMessage(content=prompt)
+            ]
+            response = await self.llm.ainvoke(messages)
             response_text = response.content if hasattr(response, 'content') else str(response)
             
             payloads = self._parse_payload_response(response_text)
@@ -736,6 +740,8 @@ class PayloadGenerator:
         num_payloads: int,
     ) -> list[GeneratedPayload]:
         """Generate bypass payloads using LLM."""
+        from langchain_core.messages import HumanMessage, SystemMessage
+        
         blocked_list = "\n".join(f"- `{p}`" for p in blocked_payloads[-5:])
         
         prompt = REFINEMENT_PROMPT.format(
@@ -744,11 +750,13 @@ class PayloadGenerator:
             num_payloads=num_payloads
         )
         
-        # Combine system and user prompt into single string for browser-use LLM
-        full_prompt = f"{PAYLOAD_GENERATION_SYSTEM}\n\n{prompt}"
-        
         try:
-            response = await self.llm.ainvoke(full_prompt)
+            # Use proper message format for LangChain LLMs
+            messages = [
+                SystemMessage(content=PAYLOAD_GENERATION_SYSTEM),
+                HumanMessage(content=prompt)
+            ]
+            response = await self.llm.ainvoke(messages)
             response_text = response.content if hasattr(response, 'content') else str(response)
             
             payloads = self._parse_payload_response(response_text)
