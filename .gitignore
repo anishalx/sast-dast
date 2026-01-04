@@ -1,0 +1,15 @@
+# Environment and virtual env
+.env
+/venv
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Test/Example input files
+example_input.json
+test.json
+
+# Generated output files
+result.json
+report.md
