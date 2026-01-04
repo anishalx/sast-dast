@@ -37,6 +37,13 @@ from sast_dast_validator.payload_generator import (
     GeneratedPayload,
     PayloadTester,
 )
+from sast_dast_validator.rate_limit import (
+    is_retryable_error,
+    is_rate_limit_error,
+    get_retry_delay,
+    format_retry_message,
+    RateLimitConfig,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -255,26 +262,115 @@ class DynamicValidator:
         findings: list[NormalizedFinding],
         on_progress: Callable[[int, int, ValidationResult], None] | None = None,
     ) -> list[ValidationResult]:
-        """Validate findings in parallel with semaphore limiting."""
+        """
+        Validate findings in parallel with:
+        - Staggered execution (2s delay between starts to prevent API overwhelm)
+        - Retry logic with exponential backoff for rate limits
+        - Fault-tolerant execution (one failure doesn't stop others)
+        """
+        stagger_delay = 2.0  # Delay between parallel agent starts
+        max_retries = 3
         
-        async def validate_with_semaphore(finding: NormalizedFinding) -> ValidationResult:
+        async def validate_with_stagger_and_retry(
+            finding: NormalizedFinding,
+            index: int
+        ) -> ValidationResult:
+            """Validate with staggered start and retry logic."""
+            # Stagger: Add delay based on index to prevent API overwhelm
+            # Agent 0: starts immediately
+            # Agent 1: starts after 2s
+            # Agent 2: starts after 4s
+            # etc.
+            if index > 0:
+                await asyncio.sleep(index * stagger_delay)
+                logger.debug(f"Agent {index} starting after {index * stagger_delay}s stagger")
+            
             async with self._semaphore:
-                result = await self._validate_one_safe(finding)
+                last_error = None
+                
+                for attempt in range(1, max_retries + 1):
+                    try:
+                        result = await self._validate_one_safe(finding)
+                        self._completed += 1
+                        
+                        if on_progress:
+                            on_progress(self._completed, self._total, result)
+                        
+                        # Rate limiting between successful tests
+                        if self.config.delay > 0:
+                            await asyncio.sleep(self.config.delay)
+                        
+                        return result
+                        
+                    except Exception as e:
+                        last_error = e
+                        
+                        # Check if error is retryable
+                        if is_retryable_error(e) and attempt < max_retries:
+                            delay = get_retry_delay(e, attempt)
+                            
+                            # Log retry message
+                            if is_rate_limit_error(e):
+                                logger.warning(
+                                    f"⚠️ Rate limit hit for finding {finding.id} "
+                                    f"(attempt {attempt}/{max_retries}), "
+                                    f"retrying in {delay:.1f}s..."
+                                )
+                            else:
+                                logger.warning(
+                                    f"⚠️ Retryable error for finding {finding.id} "
+                                    f"(attempt {attempt}/{max_retries}): {str(e)[:80]}, "
+                                    f"retrying in {delay:.1f}s..."
+                                )
+                            
+                            await asyncio.sleep(delay)
+                        else:
+                            # Non-retryable or max retries exhausted
+                            if attempt >= max_retries:
+                                logger.error(
+                                    f"❌ All {max_retries} retries exhausted for finding {finding.id}"
+                                )
+                            break
+                
+                # All retries exhausted - return error result
                 self._completed += 1
+                error_result = ValidationResult(
+                    finding_id=finding.id,
+                    status=ValidationStatus.ERROR,
+                    tested_url=finding.url,
+                    evidence=f"ERROR: {str(last_error)[:200]}" if last_error else "ERROR: Unknown error",
+                )
                 
                 if on_progress:
-                    on_progress(self._completed, self._total, result)
+                    on_progress(self._completed, self._total, error_result)
                 
-                # Rate limiting
-                if self.config.delay > 0:
-                    await asyncio.sleep(self.config.delay)
-                
-                return result
+                return error_result
         
-        tasks = [validate_with_semaphore(f) for f in findings]
-        results = await asyncio.gather(*tasks)
+        # Create tasks with staggered execution
+        tasks = [
+            validate_with_stagger_and_retry(finding, index)
+            for index, finding in enumerate(findings)
+        ]
         
-        return list(results)
+        # Fault-tolerant execution: return_exceptions=True means
+        # one failure doesn't stop others
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Convert any exceptions to error results
+        final_results = []
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                logger.error(f"Unexpected exception for finding {findings[i].id}: {result}")
+                final_results.append(ValidationResult(
+                    finding_id=findings[i].id,
+                    status=ValidationStatus.ERROR,
+                    tested_url=findings[i].url,
+                    evidence=f"ERROR: Unexpected exception - {str(result)[:150]}",
+                ))
+            else:
+                final_results.append(result)
+        
+        return final_results
     
     async def _validate_sequential(
         self,
