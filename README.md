@@ -29,7 +29,7 @@
 
 SAST (Static Application Security Testing) tools analyze source code to find vulnerabilities, but they often produce false positives because they can't verify if issues are actually exploitable at runtime. This tool solves that problem by:
 
-1. **Ingesting SAST findings** from tools like Semgrep, CodeQL, Snyk, Bandit
+1. **Ingesting SAST findings** from tools like Semgrep
 2. **Normalizing** them into a standardized format
 3. **Dynamically testing** each finding using real browser automation
 4. **Reporting** which vulnerabilities are confirmed exploitable, false positives, or need manual review
@@ -55,7 +55,7 @@ SAST (Static Application Security Testing) tools analyze source code to find vul
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
 │   SAST Tools    │    │   Normalizer    │    │    Executor     │    │     Results     │
 │   (Semgrep,     │───▶│   Transforms    │───▶│   LLM + Browser │───▶│   JSON Report   │
-│    CodeQL)      │    │   to standard   │    │   validates     │    │   with evidence │
+│    )      │    │   to standard   │    │   validates     │    │   with evidence │
 └─────────────────┘    │   format        │    │   each finding  │    └─────────────────┘
                        └─────────────────┘    └─────────────────┘
 ```
@@ -343,7 +343,7 @@ Defines all Pydantic models used throughout the framework.
 ```python
 class NormalizedFinding(BaseModel):
     id: str                        # Unique identifier (UUID7)
-    source_tool: str               # e.g., 'semgrep', 'bandit', 'codeql'
+    source_tool: str               # e.g., 'semgrep'
     source_rule_id: str            # Original SAST rule ID
     vuln_type: VulnType            # Detected vulnerability type
     category: VulnCategory | None  # High-level category
